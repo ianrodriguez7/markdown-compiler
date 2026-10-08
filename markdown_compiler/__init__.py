@@ -3,7 +3,51 @@ This file contains functions that work on entire documents at a time
 (and not line-by-line).
 '''
 
-from markdown_compiler.util.line_functions import *
+from markdown_compiler.util.line_functions import (
+    compile_headers,
+    compile_strikethrough,
+    compile_bold_stars,
+    compile_bold_underscore,
+    compile_italic_star,
+    compile_italic_underscore,
+    compile_code_inline,
+    compile_images,
+    compile_links,
+)
+
+
+def _compile_inline(line):
+    '''
+    Apply every single-line transformation to one line, in order.
+    '''
+    line = compile_headers(line)
+    line = compile_strikethrough(line)
+    line = compile_bold_stars(line)
+    line = compile_bold_underscore(line)
+    line = compile_italic_star(line)
+    line = compile_italic_underscore(line)
+    line = compile_code_inline(line)
+    line = compile_images(line)
+    line = compile_links(line)
+    return line
+
+
+def _ordered_item_marker(line):
+    '''
+    Return the index of the ". " that separates an ordered-list number from
+    its text, or -1 when the line is not an ordered-list item.
+
+    >>> _ordered_item_marker('1. hello')
+    1
+    >>> _ordered_item_marker('12. hello')
+    2
+    >>> _ordered_item_marker('not a list')
+    -1
+    '''
+    marker = line.find('. ')
+    if marker > 0 and line[:marker].isdigit():
+        return marker
+    return -1
 
 
 def compile_lines(text):
@@ -129,30 +173,76 @@ def compile_lines(text):
         print('i=',i)
     </pre>
     <BLANKLINE>
+
+    NOTE:
+    This third set of test cases covers ordered (numbered) lists.
+    Consecutive "1. item" lines become an <ol> with one <li> per item,
+    and the list ends when a non-item line appears.
+
+    >>> compile_lines('1. only item')
+    '<ol>\n<li>only item</li>\n</ol>'
+
+    >>> compile_lines('1. this\n2. is\n3. a\n4. list')
+    '<ol>\n<li>this</li>\n<li>is</li>\n<li>a</li>\n<li>list</li>\n</ol>'
+
+    >>> print(compile_lines('Here is a list:\n\n1. one\n2. two'))
+    <p>
+    Here is a list:
+    </p>
+    <ol>
+    <li>one</li>
+    <li>two</li>
+    </ol>
     '''
     lines = text.split('\n')
     new_lines = []
     in_paragraph = False
-    for line in lines:
-        line = line.strip()
-        if line=='':
+    in_code = False
+    in_list = False
+    for raw_line in lines:
+        # Preserve the contents of fenced code blocks exactly.
+        if in_code:
+            if raw_line.strip().startswith('```'):
+                in_code = False
+                new_lines.append('</pre>')
+            else:
+                new_lines.append(raw_line)
+            continue
+        if raw_line.strip().startswith('```'):
+            in_code = True
+            new_lines.append('<pre>')
+            continue
+
+        line = raw_line.strip()
+
+        # Ordered-list items are grouped inside a single <ol> block.
+        marker = _ordered_item_marker(line)
+        if marker != -1:
+            if not in_list:
+                if in_paragraph:
+                    new_lines.append('</p>')
+                    in_paragraph = False
+                in_list = True
+                new_lines.append('<ol>')
+            new_lines.append('<li>' + _compile_inline(line[marker + 2:]) + '</li>')
+            continue
+        if in_list:
+            in_list = False
+            new_lines.append('</ol>')
+
+        if line == '':
             if in_paragraph:
-                line='</p>'
+                line = '</p>'
                 in_paragraph = False
         else:
             if line[0] != '#' and not in_paragraph:
                 in_paragraph = True
-                line = '<p>\n'+line
-            line = compile_headers(line)
-            line = compile_strikethrough(line)
-            line = compile_bold_stars(line)
-            line = compile_bold_underscore(line)
-            line = compile_italic_star(line)
-            line = compile_italic_underscore(line)
-            line = compile_code_inline(line)
-            line = compile_images(line)
-            line = compile_links(line)
+                line = '<p>\n' + line
+            line = _compile_inline(line)
         new_lines.append(line)
+
+    if in_list:
+        new_lines.append('</ol>')
     new_text = '\n'.join(new_lines)
     return new_text
 
@@ -189,10 +279,10 @@ def markdown_to_html(markdown, add_css):
 <link rel="stylesheet" href="https://izbicki.me/css/code.css" />
 <link rel="stylesheet" href="https://izbicki.me/css/default.css" />
         '''
-    html+='''
+    html += '''
 </head>
 <body>
-    '''+compile_lines(markdown)+'''
+    ''' + compile_lines(markdown) + '''
 </body>
 </html>
     '''
@@ -227,7 +317,7 @@ def minify(html):
     >>> minify('a\n\n\n\n\n\n\n\n\n\n\n\n\n\nb\n\n\n\n\n\n\n\n\n\n')
     'a b'
     '''
-    return html
+    return ' '.join(html.split())
 
 
 def convert_file(input_file, add_css):
@@ -254,5 +344,5 @@ def convert_file(input_file, add_css):
     # Keep code-block newlines and indentation in the saved page.
 
     # write the output file
-    with open(input_file[:-2]+'html', 'w', encoding='utf-8') as f:
+    with open(input_file[:-2] + 'html', 'w', encoding='utf-8') as f:
         f.write(html)

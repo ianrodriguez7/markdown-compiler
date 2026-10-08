@@ -1,6 +1,40 @@
 '''
-Each of the functions in this file takes a single line of input and transforms the line in some way.
+Each of the functions in this file takes a single line of input and
+transforms the line in some way.
 '''
+
+
+def _compile_delimited(line, delimiter, tag):
+    '''
+    Replace each matched pair of `delimiter` with an HTML `tag`.
+
+    Unmatched delimiters are left unchanged. This helper powers the bold,
+    italic, and strikethrough functions, which differ only in their
+    delimiter and tag.
+
+    >>> _compile_delimited('a *b* c', '*', 'i')
+    'a <i>b</i> c'
+    >>> _compile_delimited('a *b c', '*', 'i')
+    'a *b c'
+    '''
+    opening = '<' + tag + '>'
+    closing = '</' + tag + '>'
+    width = len(delimiter)
+    result = ''
+    index = 0
+    while True:
+        start = line.find(delimiter, index)
+        if start == -1:
+            result += line[index:]
+            break
+        end = line.find(delimiter, start + width)
+        if end == -1:
+            result += line[index:]
+            break
+        result += line[index:start] + opening + line[start + width:end] + closing
+        index = end + width
+    return result
+
 
 def compile_headers(line):
     '''
@@ -26,6 +60,10 @@ def compile_headers(line):
     >>> compile_headers('      # this is not a header')
     '      # this is not a header'
     '''
+    for level in range(6, 0, -1):
+        prefix = '#' * level
+        if line[:level] == prefix and (len(line) == level or line[level] != '#'):
+            return '<h' + str(level) + '>' + line[level:] + '</h' + str(level) + '>'
     return line
 
 
@@ -50,7 +88,7 @@ def compile_italic_star(line):
     >>> compile_italic_star('*')
     '*'
     '''
-    return line
+    return _compile_delimited(line, '*', 'i')
 
 
 def compile_italic_underscore(line):
@@ -71,7 +109,7 @@ def compile_italic_underscore(line):
     >>> compile_italic_underscore('_')
     '_'
     '''
-    return line
+    return _compile_delimited(line, '_', 'i')
 
 
 def compile_strikethrough(line):
@@ -94,7 +132,7 @@ def compile_strikethrough(line):
     >>> compile_strikethrough('~~')
     '~~'
     '''
-    return line
+    return _compile_delimited(line, '~~', 'ins')
 
 
 def compile_bold_stars(line):
@@ -115,7 +153,7 @@ def compile_bold_stars(line):
     >>> compile_bold_stars('**')
     '**'
     '''
-    return line
+    return _compile_delimited(line, '**', 'b')
 
 
 def compile_bold_underscore(line):
@@ -136,7 +174,7 @@ def compile_bold_underscore(line):
     >>> compile_bold_underscore('__')
     '__'
     '''
-    return line
+    return _compile_delimited(line, '__', 'b')
 
 
 def compile_code_inline(line):
@@ -166,7 +204,23 @@ def compile_code_inline(line):
     >>> compile_code_inline('```python3')
     '```python3'
     '''
-    return line
+    if '```' in line:
+        return line
+    result = ''
+    index = 0
+    while True:
+        start = line.find('`', index)
+        if start == -1:
+            result += line[index:]
+            break
+        end = line.find('`', start + 1)
+        if end == -1:
+            result += line[index:]
+            break
+        content = line[start + 1:end].replace('<', '&lt;').replace('>', '&gt;')
+        result += line[index:start] + '<code>' + content + '</code>'
+        index = end + 1
+    return result
 
 
 def compile_links(line):
@@ -186,7 +240,30 @@ def compile_links(line):
     >>> compile_links('this is wrong: [course webpage](https://github.com/mikeizbicki/cmc-csci040')
     'this is wrong: [course webpage](https://github.com/mikeizbicki/cmc-csci040'
     '''
-    return line
+    result = ''
+    index = 0
+    while True:
+        open_bracket = line.find('[', index)
+        if open_bracket == -1:
+            result += line[index:]
+            break
+        close_bracket = line.find(']', open_bracket)
+        if close_bracket == -1:
+            result += line[index:]
+            break
+        if close_bracket + 1 >= len(line) or line[close_bracket + 1] != '(':
+            result += line[index:close_bracket + 1]
+            index = close_bracket + 1
+            continue
+        close_paren = line.find(')', close_bracket + 1)
+        if close_paren == -1:
+            result += line[index:]
+            break
+        text = line[open_bracket + 1:close_bracket]
+        url = line[close_bracket + 2:close_paren]
+        result += line[index:open_bracket] + '<a href="' + url + '">' + text + '</a>'
+        index = close_paren + 1
+    return result
 
 
 def compile_images(line):
@@ -205,4 +282,27 @@ def compile_images(line):
     >>> compile_images('This is an image of Mike Izbicki: ![Mike Izbicki](https://avatars1.githubusercontent.com/u/1052630?v=2&s=460)')
     'This is an image of Mike Izbicki: <img src="https://avatars1.githubusercontent.com/u/1052630?v=2&s=460" alt="Mike Izbicki" />'
     '''
-    return line
+    result = ''
+    index = 0
+    while True:
+        bang = line.find('![', index)
+        if bang == -1:
+            result += line[index:]
+            break
+        close_bracket = line.find(']', bang + 2)
+        if close_bracket == -1:
+            result += line[index:]
+            break
+        if close_bracket + 1 >= len(line) or line[close_bracket + 1] != '(':
+            result += line[index:close_bracket + 1]
+            index = close_bracket + 1
+            continue
+        close_paren = line.find(')', close_bracket + 1)
+        if close_paren == -1:
+            result += line[index:]
+            break
+        alt = line[bang + 2:close_bracket]
+        src = line[close_bracket + 2:close_paren]
+        result += line[index:bang] + '<img src="' + src + '" alt="' + alt + '" />'
+        index = close_paren + 1
+    return result
